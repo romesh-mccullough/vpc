@@ -101,9 +101,6 @@ iptables -n -t nat -L POSTROUTING | log
 
 log "Configuration of NAT/PAT complete."
 
-# Upgrade AWS CLI to latest version
-easy_install pip && pip install awscli --upgrade awscli && log "AWS CLI Upgraded Successfully. Beginning HA NAT configuration..."
-
 # Set CLI Output to text
 export AWS_DEFAULT_OUTPUT="text"
 
@@ -132,30 +129,27 @@ MAIN_RT=`aws ec2 describe-route-tables --query 'RouteTables[*].RouteTableId' --f
 	
 log "HA NAT configuration parameters: Instance ID=$INSTANCE_ID, Region=$REGION, Availability Zone=$AVAILABILITY_ZONE, VPC=$VPC_ID"
 
-# Get list of subnets in same VPC and AZ that have tag network=private
-PRIVATE_SUBNETS="`aws ec2 describe-subnets --query 'Subnets[*].SubnetId' \
---filters Name=availability-zone,Values=$AVAILABILITY_ZONE Name=vpc-id,Values=$VPC_ID Name=state,Values=available Name=tag:network,Values=private`"
-	# If no private subnets found, exit out
-	if [ -z "$PRIVATE_SUBNETS" ]; then
-		die "No private subnets found to modify for HA NAT."
-	else log "Modifying Route Tables for following private subnets: $PRIVATE_SUBNETS"
+
+
+# Get list of private route tables tagged for this subnet, tags primary-az=$AVAILABILITY_ZONE an  network=private
+PRIVATE_ROUTE_TABLES="`aws ec2 describe-route-tables --query 'RouteTables[*].RouteTableId' \
+--filters Name=vpc-id,Values=$VPC_ID Name=tag:network,Values=private Name=tag:primary-az,Values=$AVAILABILITY_ZONE`"
+	# If no private route tables found, exit
+	if [ -z "$PRIVATE_ROUTE_TABLES" ]; then
+		die "No private route tables found to modify."
+	else log "Modifying the following route tables: $PRIVATE_ROUTE_TABLES"
 	fi
-for subnet in $PRIVATE_SUBNETS; do
-	ROUTE_TABLE_ID=`aws ec2 describe-route-tables --query 'RouteTables[*].RouteTableId' --filters Name=association.subnet-id,Values=$subnet`;
-	# If private tagged subnet is associated with Main Routing Table, do not create or modify route.
-	if [ "$ROUTE_TABLE_ID" = "$MAIN_RT" ]; then
-		log "$subnet is associated with the VPC Main Route Table. HA NAT script will NOT edit Main Route Table."
-	# If subnet is not associated with a Route Table, skip it.
-	elif [ -z "$ROUTE_TABLE_ID" ]; then
-		log "$subnet is not associated with a Route Table. Skipping this subnet."
+for table in $PRIVATE_ROUTE_TABLES; do
+	if [ "$table" = "$MAIN_RT" ]; then
+	       	log "$table is the main route table.  HA NAT script will NOT edit Main Route Table."
 	else
-		# Modify found private subnet's Routing Table to point to new HA NAT instance id
-		aws ec2 create-route --route-table-id $ROUTE_TABLE_ID --destination-cidr-block 0.0.0.0/0 --instance-id $INSTANCE_ID &&
-		log "$ROUTE_TABLE_ID associated with $subnet modified to point default route to $INSTANCE_ID."
-		if [ $? -ne 0 ] ; then
-			log "Route already exists, replacing existing route."
-			aws ec2 replace-route --route-table-id $ROUTE_TABLE_ID --destination-cidr-block 0.0.0.0/0 --instance-id $INSTANCE_ID
-		fi
+               # Modify found private subnet's Routing Table to point to new HA NAT instance id
+               aws ec2 create-route --route-table-id $table --destination-cidr-block 0.0.0.0/0 --instance-id $INSTANCE_ID &&
+               log "$table has been modified to point default route to $INSTANCE_ID."
+               if [ $? -ne 0 ] ; then
+                       log "Route already exists, replacing existing route."
+                       aws ec2 replace-route --route-table-id $table --destination-cidr-block 0.0.0.0/0 --instance-id $INSTANCE_ID
+               fi
 	fi
 done
 
