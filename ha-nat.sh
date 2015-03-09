@@ -126,10 +126,21 @@ VPC_ID=`aws ec2 describe-instances --instance-ids $INSTANCE_ID --query 'Reservat
 # Determine Main Route Table for the VPC
 MAIN_RT=`aws ec2 describe-route-tables --query 'RouteTables[*].RouteTableId' --filters Name=vpc-id,Values=$VPC_ID Name=association.main,Values=true` ||
 	die "Unable to determine VPC Main Route Table."
+
+# Optional EIP attachment, file is dropped from user-data
+EIP_LIST="/root/eip_alloc.list"
+if [ -e "$EIP_LIST" ]; then
+	EIP=`grep $AVAILABILITY_ZONE $EIP_LIST | awk '{print $2}'`
+        if [ -n "$EIP" ]; then
+		log "Associating EIP $EIP"
+		aws ec2 associate-address --instance-id $INSTANCE_ID --allocation-id $EIP
+	else
+		log "No matching EIP found for $AVAILABILITY_ZONE"
+		log "eip_alloc.list: `cat $EIP_LIST`"
+	fi
+fi
 	
 log "HA NAT configuration parameters: Instance ID=$INSTANCE_ID, Region=$REGION, Availability Zone=$AVAILABILITY_ZONE, VPC=$VPC_ID"
-
-
 
 # Get list of private route tables tagged for this subnet, tags primary-az=$AVAILABILITY_ZONE an  network=private
 PRIVATE_ROUTE_TABLES="`aws ec2 describe-route-tables --query 'RouteTables[*].RouteTableId' \
