@@ -1,5 +1,8 @@
 #!/bin/bash
 #
+# This version is from https://github.com/romesh-mccullough/vpc/edit/master/ha-nat.sh
+# 
+#
 # Copyright 2013 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License").
